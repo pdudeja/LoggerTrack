@@ -1,0 +1,798 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Log Viewer — location-tracker</title>
+<style>
+  :root {
+    --bg:       #0d1117;
+    --bg2:      #161b22;
+    --bg3:      #21262d;
+    --bg4:      #30363d;
+    --border:   #30363d;
+    --text:     #e6edf3;
+    --muted:    #8b949e;
+    --green:    #3fb950;
+    --red:      #f85149;
+    --yellow:   #d29922;
+    --blue:     #58a6ff;
+    --purple:   #bc8cff;
+    --cyan:     #39d353;
+    --orange:   #fb8f44;
+    --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+    --font-ui:   'Inter', 'Segoe UI', system-ui, sans-serif;
+    --radius:   6px;
+    --sidebar:  340px;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-ui);
+    font-size: 13px;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* ── TOPBAR ─────────────────────────────────────── */
+  .topbar {
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    padding: 0 16px;
+    height: 52px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-shrink: 0;
+    z-index: 10;
+  }
+  .topbar-logo {
+    display: flex; align-items: center; gap: 8px;
+    font-family: var(--font-mono);
+    font-size: 14px; font-weight: 600; color: var(--green);
+    white-space: nowrap;
+  }
+  .topbar-logo span { color: var(--muted); font-weight: 400; }
+  .topbar-spacer { flex: 1; }
+  .file-info {
+    font-family: var(--font-mono);
+    font-size: 11px; color: var(--muted);
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    padding: 4px 10px; border-radius: var(--radius);
+    max-width: 260px; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap;
+  }
+  .upload-btn {
+    display: flex; align-items: center; gap: 6px;
+    background: var(--green); color: #000;
+    border: none; border-radius: var(--radius);
+    padding: 6px 14px; font-size: 12px; font-weight: 600;
+    cursor: pointer; white-space: nowrap; transition: opacity .15s;
+  }
+  .upload-btn:hover { opacity: .85; }
+
+  /* ── STAT BAR ──────────────────────────────────── */
+  .statbar {
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    padding: 0 16px;
+    height: 44px;
+    display: flex; align-items: center; gap: 24px;
+    flex-shrink: 0; overflow-x: auto;
+  }
+  .stat-chip {
+    display: flex; align-items: center; gap: 6px;
+    white-space: nowrap; font-size: 12px;
+  }
+  .stat-chip .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .stat-chip .val { font-weight: 600; font-family: var(--font-mono); }
+  .stat-divider { width: 1px; height: 20px; background: var(--border); flex-shrink: 0; }
+
+  /* ── FILTER BAR ─────────────────────────────────── */
+  .filterbar {
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    padding: 8px 16px;
+    display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+    flex-shrink: 0;
+  }
+  .search-wrap {
+    position: relative; flex: 1; min-width: 180px; max-width: 340px;
+  }
+  .search-wrap svg {
+    position: absolute; left: 9px; top: 50%; transform: translateY(-50%);
+    pointer-events: none; opacity: .4;
+  }
+  input[type="text"], select {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: var(--radius);
+    padding: 5px 10px;
+    font-size: 12px;
+    font-family: var(--font-ui);
+    outline: none;
+    transition: border-color .15s;
+  }
+  input[type="text"]:focus, select:focus { border-color: var(--blue); }
+  .search-wrap input { padding-left: 28px; width: 100%; }
+  select { cursor: pointer; }
+  .filter-btn {
+    padding: 5px 12px; border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: var(--bg3); color: var(--muted);
+    font-size: 12px; cursor: pointer; transition: all .15s;
+    font-family: var(--font-ui);
+  }
+  .filter-btn:hover, .filter-btn.active {
+    background: var(--bg4); color: var(--text); border-color: var(--blue);
+  }
+  .filter-btn.lvl-error.active  { color: var(--red);    border-color: var(--red);    background: #f8514915; }
+  .filter-btn.lvl-warn.active   { color: var(--yellow); border-color: var(--yellow); background: #d2992215; }
+  .filter-btn.lvl-info.active   { color: var(--green);  border-color: var(--green);  background: #3fb95015; }
+  .result-count {
+    font-family: var(--font-mono); font-size: 11px; color: var(--muted);
+    margin-left: auto; white-space: nowrap;
+  }
+
+  /* ── MAIN LAYOUT ────────────────────────────────── */
+  .main {
+    flex: 1; display: flex; overflow: hidden;
+  }
+
+  /* ── LOG TABLE ──────────────────────────────────── */
+  .log-table-wrap {
+    flex: 1; overflow-y: auto; overflow-x: hidden;
+  }
+  .log-table-wrap::-webkit-scrollbar { width: 6px; }
+  .log-table-wrap::-webkit-scrollbar-track { background: var(--bg2); }
+  .log-table-wrap::-webkit-scrollbar-thumb { background: var(--bg4); border-radius: 3px; }
+
+  table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  thead th {
+    background: var(--bg2); position: sticky; top: 0; z-index: 5;
+    text-align: left; font-size: 11px; color: var(--muted);
+    font-weight: 500; letter-spacing: .5px; text-transform: uppercase;
+    padding: 7px 10px; border-bottom: 1px solid var(--border);
+  }
+  col.c-ts    { width: 168px; }
+  col.c-lvl   { width: 62px; }
+  col.c-type  { width: 130px; }
+  col.c-method{ width: 54px; }
+  col.c-path  { width: auto; }
+  col.c-status{ width: 58px; }
+  col.c-dur   { width: 66px; }
+
+  tbody tr {
+    border-bottom: 1px solid #21262d;
+    cursor: pointer;
+    transition: background .08s;
+  }
+  tbody tr:hover   { background: var(--bg2); }
+  tbody tr.active  { background: #1f2937; border-left: 2px solid var(--blue); }
+  tbody tr.err-row { background: #1a0a0a; }
+  tbody tr.err-row:hover { background: #221010; }
+
+  td {
+    padding: 6px 10px; font-family: var(--font-mono);
+    font-size: 11.5px; white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis; vertical-align: middle;
+  }
+  .ts  { color: var(--muted); }
+  .lvl-badge {
+    display: inline-block; padding: 1px 6px; border-radius: 3px;
+    font-size: 10px; font-weight: 700; letter-spacing: .3px; text-transform: uppercase;
+  }
+  .lvl-info    { background: #3fb95022; color: var(--green);  border: 1px solid #3fb95055; }
+  .lvl-error   { background: #f8514922; color: var(--red);    border: 1px solid #f8514955; }
+  .lvl-warn    { background: #d2992222; color: var(--yellow); border: 1px solid #d2992255; }
+  .lvl-debug   { background: #58a6ff22; color: var(--blue);   border: 1px solid #58a6ff55; }
+  .type-req    { color: var(--cyan);   }
+  .type-res    { color: var(--purple); }
+  .type-gen    { color: var(--muted);  }
+  .method-GET  { color: var(--green);  }
+  .method-POST { color: var(--blue);   }
+  .method-PUT  { color: var(--yellow); }
+  .method-DELETE { color: var(--red); }
+  .status-2xx  { color: var(--green);  }
+  .status-4xx  { color: var(--yellow); }
+  .status-5xx  { color: var(--red);    }
+  .dur-fast    { color: var(--green);  }
+  .dur-mid     { color: var(--yellow); }
+  .dur-slow    { color: var(--red);    }
+  .path-cell   { color: var(--text); max-width: 0; }
+  .msg-cell    { color: var(--muted); max-width: 0; }
+
+  /* empty state */
+  .empty-state {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    height: 100%; gap: 16px; color: var(--muted); text-align: center;
+    padding: 40px;
+  }
+  .empty-state .icon { font-size: 48px; opacity: .3; }
+  .empty-state h2 { font-size: 16px; color: var(--text); font-weight: 500; }
+
+  /* ── DETAIL PANEL ───────────────────────────────── */
+  .detail-panel {
+    width: var(--sidebar);
+    min-width: var(--sidebar);
+    background: var(--bg2);
+    border-left: 1px solid var(--border);
+    display: flex; flex-direction: column;
+    overflow: hidden; flex-shrink: 0;
+    transition: width .2s, min-width .2s;
+  }
+  .detail-panel.hidden { width: 0; min-width: 0; border: none; }
+  .detail-header {
+    padding: 10px 14px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 8px;
+    font-size: 12px; font-weight: 600; flex-shrink: 0;
+  }
+  .detail-header .close-btn {
+    margin-left: auto; background: none; border: none;
+    color: var(--muted); cursor: pointer; font-size: 16px;
+    line-height: 1; padding: 2px 4px; border-radius: 3px;
+    transition: color .15s;
+  }
+  .detail-header .close-btn:hover { color: var(--text); }
+  .detail-body {
+    flex: 1; overflow-y: auto; padding: 12px 14px;
+  }
+  .detail-body::-webkit-scrollbar { width: 4px; }
+  .detail-body::-webkit-scrollbar-thumb { background: var(--bg4); }
+
+  .detail-section { margin-bottom: 16px; }
+  .detail-section-title {
+    font-size: 10px; text-transform: uppercase; letter-spacing: .8px;
+    color: var(--muted); font-weight: 600; margin-bottom: 8px;
+    padding-bottom: 4px; border-bottom: 1px solid var(--border);
+  }
+  .detail-row {
+    display: flex; gap: 8px; margin-bottom: 5px; align-items: flex-start;
+  }
+  .detail-key {
+    font-family: var(--font-mono); font-size: 10.5px; color: var(--muted);
+    min-width: 80px; flex-shrink: 0; padding-top: 1px;
+  }
+  .detail-val {
+    font-family: var(--font-mono); font-size: 11px; color: var(--text);
+    word-break: break-all; line-height: 1.5;
+  }
+  .detail-val.green { color: var(--green); }
+  .detail-val.red   { color: var(--red);   }
+  .detail-val.blue  { color: var(--blue);  }
+  .json-block {
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 10px;
+    font-family: var(--font-mono); font-size: 10.5px;
+    color: var(--text); white-space: pre-wrap; word-break: break-all;
+    line-height: 1.6; max-height: 280px; overflow-y: auto;
+  }
+  .json-block::-webkit-scrollbar { width: 3px; }
+  .json-block::-webkit-scrollbar-thumb { background: var(--bg4); }
+
+  .stack-block {
+    background: #1a0505; border: 1px solid #5a1a1a;
+    border-radius: var(--radius); padding: 10px;
+    font-family: var(--font-mono); font-size: 10px; color: #ff8a8a;
+    white-space: pre-wrap; word-break: break-all; line-height: 1.6;
+    max-height: 200px; overflow-y: auto;
+  }
+  .related-pair {
+    display: flex; gap: 6px; margin-bottom: 6px;
+  }
+  .pair-chip {
+    flex: 1; padding: 6px 8px; border-radius: var(--radius);
+    border: 1px solid var(--border); background: var(--bg3);
+    font-family: var(--font-mono); font-size: 10px; cursor: pointer;
+    transition: border-color .15s;
+  }
+  .pair-chip:hover { border-color: var(--blue); }
+  .pair-chip .ptype { font-size: 9px; color: var(--muted); margin-bottom: 2px; }
+
+  /* ── PAGINATION ─────────────────────────────────── */
+  .pagination {
+    background: var(--bg2); border-top: 1px solid var(--border);
+    padding: 6px 16px; display: flex; align-items: center; gap: 8px;
+    font-size: 12px; color: var(--muted); flex-shrink: 0;
+  }
+  .pg-btn {
+    background: var(--bg3); border: 1px solid var(--border);
+    color: var(--text); border-radius: var(--radius);
+    padding: 3px 10px; cursor: pointer; font-size: 11px;
+    transition: all .15s;
+  }
+  .pg-btn:hover:not(:disabled) { background: var(--bg4); border-color: var(--blue); }
+  .pg-btn:disabled { opacity: .3; cursor: default; }
+  .pg-info { font-family: var(--font-mono); font-size: 11px; }
+
+  /* ── UPLOAD OVERLAY ─────────────────────────────── */
+  .upload-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,.75);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 100; display: none;
+  }
+  .upload-overlay.show { display: flex; }
+  .upload-box {
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 10px; padding: 32px; width: 420px;
+    text-align: center;
+  }
+  .upload-box h2 { font-size: 16px; margin-bottom: 8px; }
+  .upload-box p  { font-size: 12px; color: var(--muted); margin-bottom: 20px; }
+  .drop-zone {
+    border: 2px dashed var(--border); border-radius: 8px;
+    padding: 32px; cursor: pointer; transition: all .15s;
+    margin-bottom: 16px;
+  }
+  .drop-zone:hover, .drop-zone.drag  { border-color: var(--green); background: #3fb95010; }
+  .drop-zone .dz-icon { font-size: 32px; margin-bottom: 8px; opacity: .5; }
+  .drop-zone p { font-size: 12px; color: var(--muted); }
+  .close-overlay {
+    background: var(--bg3); border: 1px solid var(--border);
+    color: var(--muted); padding: 6px 16px; border-radius: var(--radius);
+    cursor: pointer; font-size: 12px; font-family: var(--font-ui);
+  }
+
+  /* ── LOADING ─────────────────────────────────────── */
+  .spinner {
+    display: inline-block; width: 14px; height: 14px;
+    border: 2px solid var(--border); border-top-color: var(--green);
+    border-radius: 50%; animation: spin .6s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .toast {
+    position: fixed; bottom: 20px; right: 20px;
+    background: var(--bg3); border: 1px solid var(--border);
+    padding: 10px 16px; border-radius: var(--radius);
+    font-size: 12px; z-index: 200; animation: fadeIn .2s ease;
+    display: none;
+  }
+  .toast.show { display: block; }
+  .toast.err  { border-color: var(--red); color: var(--red); }
+  .toast.ok   { border-color: var(--green); color: var(--green); }
+  @keyframes fadeIn { from { opacity:0; transform: translateY(8px); } }
+
+  .json-key   { color: #79c0ff; }
+  .json-str   { color: #a5d6ff; }
+  .json-num   { color: #f0883e; }
+  .json-bool  { color: #d2a8ff; }
+  .json-null  { color: var(--muted); }
+</style>
+</head>
+<body>
+
+<!-- TOP BAR -->
+<div class="topbar">
+  <div class="topbar-logo">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+    Log<span>Viewer</span>
+  </div>
+  <div id="fileInfo" class="file-info">No file loaded</div>
+  <div class="topbar-spacer"></div>
+  <button class="upload-btn" onclick="openUpload()">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+    Upload Log
+  </button>
+</div>
+
+<!-- STAT BAR -->
+<div class="statbar" id="statbar" style="display:none">
+  <div class="stat-chip"><div class="dot" style="background:#8b949e"></div><span class="val" id="st-total">0</span><span style="color:var(--muted)">total</span></div>
+  <div class="stat-divider"></div>
+  <div class="stat-chip"><div class="dot" style="background:var(--green)"></div><span class="val" id="st-info">0</span><span style="color:var(--muted)">info</span></div>
+  <div class="stat-chip"><div class="dot" style="background:var(--red)"></div><span class="val" id="st-err">0</span><span style="color:var(--muted)">error</span></div>
+  <div class="stat-chip"><div class="dot" style="background:var(--yellow)"></div><span class="val" id="st-warn">0</span><span style="color:var(--muted)">warn</span></div>
+  <div class="stat-divider"></div>
+  <div class="stat-chip"><div class="dot" style="background:var(--cyan)"></div><span class="val" id="st-req">0</span><span style="color:var(--muted)">requests</span></div>
+  <div class="stat-chip"><div class="dot" style="background:var(--purple)"></div><span class="val" id="st-res">0</span><span style="color:var(--muted)">responses</span></div>
+  <div class="stat-divider"></div>
+  <div class="stat-chip">
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+    <span class="val" id="st-dur">—</span><span style="color:var(--muted)">avg</span>
+  </div>
+  <div class="stat-chip">
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--red)" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
+    <span class="val" id="st-erate" style="color:var(--red)">0%</span><span style="color:var(--muted)">errors</span>
+  </div>
+  <div class="stat-divider"></div>
+  <div class="stat-chip" style="font-family:var(--font-mono);font-size:10px;color:var(--muted)">
+    <span id="st-range">—</span>
+  </div>
+</div>
+
+<!-- FILTER BAR -->
+<div class="filterbar">
+  <div class="search-wrap">
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+    <input type="text" id="searchInput" placeholder="Search message, path, requestId…" oninput="debounceFilter()" />
+  </div>
+  <select id="levelSelect" onchange="applyFilter()">
+    <option value="">All levels</option>
+    <option value="info">Info</option>
+    <option value="error">Error</option>
+    <option value="warn">Warn</option>
+    <option value="debug">Debug</option>
+  </select>
+  <select id="typeSelect" onchange="applyFilter()">
+    <option value="">All types</option>
+    <option value="Incoming Request">Incoming Request</option>
+    <option value="Outgoing Response">Outgoing Response</option>
+    <option value="General">General</option>
+  </select>
+  <select id="statusSelect" onchange="applyFilter()">
+    <option value="">All statuses</option>
+    <option value="200">200</option>
+    <option value="201">201</option>
+    <option value="400">400</option>
+    <option value="401">401</option>
+    <option value="403">403</option>
+    <option value="404">404</option>
+    <option value="500">500</option>
+  </select>
+  <span class="result-count" id="resultCount">—</span>
+</div>
+
+<!-- MAIN -->
+<div class="main">
+  <div class="log-table-wrap">
+    <div class="empty-state" id="emptyState">
+      <div class="icon">📋</div>
+      <h2>No log file loaded</h2>
+      <p style="color:var(--muted);font-size:12px">Upload a .log file to begin analysis</p>
+      <button class="upload-btn" onclick="openUpload()" style="margin-top:8px">Upload Log File</button>
+    </div>
+    <table id="logTable" style="display:none">
+      <colgroup>
+        <col class="c-ts"><col class="c-lvl"><col class="c-type">
+        <col class="c-method"><col class="c-path">
+        <col class="c-status"><col class="c-dur">
+      </colgroup>
+      <thead>
+        <tr>
+          <th>Timestamp</th><th>Level</th><th>Type</th>
+          <th>Method</th><th>Path / Message</th>
+          <th>Status</th><th>Dur.</th>
+        </tr>
+      </thead>
+      <tbody id="logBody"></tbody>
+    </table>
+  </div>
+
+  <!-- DETAIL PANEL -->
+  <div class="detail-panel hidden" id="detailPanel">
+    <div class="detail-header">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      <span id="detailTitle">Entry Detail</span>
+      <button class="close-btn" onclick="closeDetail()">×</button>
+    </div>
+    <div class="detail-body" id="detailBody"></div>
+  </div>
+</div>
+
+<!-- PAGINATION -->
+<div class="pagination" id="paginationBar">
+  <button class="pg-btn" id="pgPrev" onclick="changePage(-1)" disabled>← Prev</button>
+  <span class="pg-info" id="pgInfo">—</span>
+  <button class="pg-btn" id="pgNext" onclick="changePage(1)" disabled>Next →</button>
+  <span style="margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--muted)" id="pgTotal"></span>
+</div>
+
+<!-- UPLOAD OVERLAY -->
+<div class="upload-overlay" id="uploadOverlay">
+  <div class="upload-box">
+    <h2>Upload Log File</h2>
+    <p>Supports Winston-format .log files with structured JSON payloads</p>
+    <div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()"
+         ondragover="e=>{e.preventDefault();this.classList.add('drag')}"
+         ondragleave="this.classList.remove('drag')"
+         ondrop="handleDrop(event)">
+      <div class="dz-icon">📂</div>
+      <p><strong>Click to browse</strong> or drag & drop</p>
+      <p style="margin-top:4px;font-size:11px">.log files · any size</p>
+    </div>
+    <div id="uploadStatus" style="font-size:12px;color:var(--muted);margin-bottom:12px;min-height:18px"></div>
+    <button class="close-overlay" onclick="closeUpload()">Cancel</button>
+    <input type="file" id="fileInput" accept=".log,.txt" style="display:none" onchange="uploadFile(this.files[0])" />
+  </div>
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<script>
+// ── STATE ─────────────────────────────────────────────────────────
+let state = { page:1, limit:100, total:0, pages:0, activeId:null };
+let filterTimer = null;
+let allStats = null;
+
+// ── API HELPERS ───────────────────────────────────────────────────
+async function api(path, options={}) {
+  const r = await fetch('/api/logs' + path, options);
+  if (!r.ok) { const e=await r.json().catch(()=>({message:r.statusText})); throw new Error(e.message||r.statusText); }
+  return r.json();
+}
+
+// ── UPLOAD ────────────────────────────────────────────────────────
+function openUpload()  { document.getElementById('uploadOverlay').classList.add('show'); }
+function closeUpload() { document.getElementById('uploadOverlay').classList.remove('show'); }
+
+function handleDrop(e) {
+  e.preventDefault();
+  document.getElementById('dropZone').classList.remove('drag');
+  const f = e.dataTransfer.files[0];
+  if (f) uploadFile(f);
+}
+
+async function uploadFile(file) {
+  if (!file) return;
+  const status = document.getElementById('uploadStatus');
+  status.innerHTML = '<span class="spinner"></span> Parsing ' + file.name + '…';
+  const fd = new FormData();
+  fd.append('file', file);
+  try {
+    const res = await api('/upload', { method:'POST', body:fd });
+    allStats = res.stats;
+    status.textContent = `✓ ${res.entries} entries loaded`;
+    updateStatBar(res.stats, res.fileName);
+    document.getElementById('fileInfo').textContent = `${res.fileName}  (${res.entries.toLocaleString()} entries)`;
+    state.page = 1;
+    setTimeout(closeUpload, 600);
+    applyFilter();
+    showToast(`Loaded ${res.entries.toLocaleString()} entries`, 'ok');
+  } catch(err) {
+    status.textContent = '✗ ' + err.message;
+    showToast(err.message, 'err');
+  }
+}
+
+// ── STATS BAR ────────────────────────────────────────────────────
+function updateStatBar(s, fileName) {
+  document.getElementById('statbar').style.display = '';
+  document.getElementById('st-total').textContent = s.total.toLocaleString();
+  document.getElementById('st-info').textContent  = s.info.toLocaleString();
+  document.getElementById('st-err').textContent   = s.error.toLocaleString();
+  document.getElementById('st-warn').textContent  = s.warn.toLocaleString();
+  document.getElementById('st-req').textContent   = s.requests.toLocaleString();
+  document.getElementById('st-res').textContent   = s.responses.toLocaleString();
+  document.getElementById('st-dur').textContent   = s.avgDurationMs + 'ms';
+  document.getElementById('st-erate').textContent = s.errorRate + '%';
+  if (s.timeRange) {
+    const fmt = iso => new Date(iso).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
+    document.getElementById('st-range').textContent = fmt(s.timeRange.from) + ' → ' + fmt(s.timeRange.to);
+  }
+}
+
+// ── FILTER ────────────────────────────────────────────────────────
+function debounceFilter() { clearTimeout(filterTimer); filterTimer = setTimeout(applyFilter, 300); }
+
+async function applyFilter() {
+  const search = document.getElementById('searchInput').value.trim();
+  const level  = document.getElementById('levelSelect').value;
+  const type   = document.getElementById('typeSelect').value;
+  const status = document.getElementById('statusSelect').value;
+
+  const params = new URLSearchParams({ page: state.page, limit: state.limit });
+  if (search) params.set('search', search);
+  if (level)  params.set('level', level);
+  if (type)   params.set('type', type);
+  if (status) params.set('statusCode', status);
+
+  try {
+    const res = await api('/?' + params);
+    state.total = res.total;
+    state.pages = res.pages;
+    state.page  = res.page;
+    renderTable(res.entries);
+    updatePagination(res);
+    document.getElementById('resultCount').textContent =
+      res.total.toLocaleString() + ' result' + (res.total!==1?'s':'');
+  } catch(err) {
+    // Silently ignore if no file loaded
+  }
+}
+
+// ── TABLE RENDER ──────────────────────────────────────────────────
+function renderTable(entries) {
+  const empty = document.getElementById('emptyState');
+  const table = document.getElementById('logTable');
+
+  if (!entries || entries.length === 0) {
+    if (!allStats) { empty.style.display='flex'; table.style.display='none'; return; }
+    empty.innerHTML = '<div class="icon">🔍</div><h2>No matching entries</h2><p style="color:var(--muted);font-size:12px">Try adjusting your filters</p>';
+    empty.style.display='flex'; table.style.display='none'; return;
+  }
+
+  empty.style.display='none'; table.style.display='';
+  const tbody = document.getElementById('logBody');
+  tbody.innerHTML = '';
+
+  for (const e of entries) {
+    const tr = document.createElement('tr');
+    if (e.level === 'error') tr.classList.add('err-row');
+    if (e.id === state.activeId) tr.classList.add('active');
+    tr.onclick = () => selectEntry(e);
+
+    const ts = new Date(e.timestamp).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit',fractionalSecondDigits:3});
+    const levelBadge = `<span class="lvl-badge lvl-${e.level}">${e.level}</span>`;
+    const typeClass = e.type==='Incoming Request'?'type-req':e.type==='Outgoing Response'?'type-res':'type-gen';
+    const typeLabel = e.type==='Incoming Request'?'→ Request':e.type==='Outgoing Response'?'← Response':'General';
+    const methodClass = `method-${e.method||''}`;
+    const pathOrMsg = e.path || e.message;
+    const statusClass = e.statusCode ? (e.statusCode>=500?'status-5xx':e.statusCode>=400?'status-4xx':'status-2xx') : '';
+    const durMs = e.duration ? parseInt(e.duration) : null;
+    const durClass = durMs===null?'':(durMs>100?'dur-slow':durMs>20?'dur-mid':'dur-fast');
+
+    tr.innerHTML = `
+      <td class="ts">${ts}</td>
+      <td>${levelBadge}</td>
+      <td class="${typeClass}">${typeLabel}</td>
+      <td class="${methodClass}">${e.method||''}</td>
+      <td class="path-cell" title="${pathOrMsg}">${pathOrMsg}</td>
+      <td class="${statusClass}">${e.statusCode||''}</td>
+      <td class="${durClass}">${e.duration||''}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+}
+
+// ── ENTRY DETAIL ──────────────────────────────────────────────────
+function selectEntry(e) {
+  state.activeId = e.id;
+  // Update active row highlight
+  document.querySelectorAll('#logBody tr').forEach(r => r.classList.remove('active'));
+  event.currentTarget.classList.add('active');
+
+  const panel = document.getElementById('detailPanel');
+  panel.classList.remove('hidden');
+
+  document.getElementById('detailTitle').textContent = `#${e.id} — ${e.type}`;
+
+  const body = document.getElementById('detailBody');
+  let html = '';
+
+  // Core
+  html += section('Core', [
+    row('timestamp', e.timestamp),
+    row('level',     `<span class="lvl-badge lvl-${e.level}">${e.level}</span>`),
+    row('type',      e.type),
+    row('service',   e.service||'—'),
+    row('env',       e.environment||'—'),
+  ]);
+
+  // Request/Response fields
+  if (e.requestId) {
+    html += section('Request', [
+      row('requestId', e.requestId),
+      e.method   ? row('method', `<span class="detail-val method-${e.method}">${e.method}</span>`) : '',
+      e.path     ? row('path',   `<span class="detail-val blue">${e.path}</span>`) : '',
+      e.ip       ? row('ip',     e.ip) : '',
+      e.userAgent? row('userAgent', e.userAgent) : '',
+    ]);
+  }
+
+  if (e.type === 'Outgoing Response') {
+    const sc = e.statusCode;
+    const scClass = sc>=500?'red':sc>=400?'detail-val' :' green';
+    html += section('Response', [
+      e.statusCode ? row('status',   `<span class="detail-val ${scClass}">${e.statusCode}</span>`) : '',
+      e.duration   ? row('duration', `<span class="detail-val dur-fast">${e.duration}</span>`) : '',
+    ]);
+    if (e.responseBody) {
+      html += `<div class="detail-section"><div class="detail-section-title">Response Body</div>
+        <div class="json-block">${syntaxHighlight(e.responseBody)}</div></div>`;
+    }
+  }
+
+  if (e.headers && Object.keys(e.headers).length) {
+    html += `<div class="detail-section"><div class="detail-section-title">Headers</div>
+      <div class="json-block">${syntaxHighlight(e.headers)}</div></div>`;
+  }
+
+  if (e.error) {
+    html += section('Error', [ row('message', `<span class="detail-val red">${e.error}</span>`) ]);
+  }
+
+  if (e.stack) {
+    html += `<div class="detail-section"><div class="detail-section-title">Stack Trace</div>
+      <div class="stack-block">${escHtml(e.stack)}</div></div>`;
+  }
+
+  // Related pair button
+  if (e.requestId) {
+    html += `<div class="detail-section">
+      <div class="detail-section-title">Paired Request/Response</div>
+      <div id="relatedPairs"><div class="spinner"></div></div>
+    </div>`;
+  }
+
+  body.innerHTML = html;
+
+  // Fetch related
+  if (e.requestId) {
+    api(`/${e.id}/related`).then(res => {
+      const container = document.getElementById('relatedPairs');
+      if (!container) return;
+      if (!res.entries || res.entries.length <= 1) {
+        container.innerHTML = '<span style="color:var(--muted);font-size:11px">No paired entry found</span>';
+        return;
+      }
+      container.innerHTML = res.entries.map(r =>
+        `<div class="related-pair">
+          <div class="pair-chip" onclick="fetchAndShow(${r.id})">
+            <div class="ptype">${r.type}</div>
+            <div style="color:var(--text)">${r.method||''} ${r.path||r.message}</div>
+            <div style="color:var(--muted);margin-top:2px">${r.statusCode||''} ${r.duration||''}</div>
+          </div>
+        </div>`
+      ).join('');
+    }).catch(()=>{});
+  }
+}
+
+async function fetchAndShow(id) {
+  try {
+    const e = await api(`/${id}`);
+    selectEntry(e);
+  } catch(err) { showToast(err.message, 'err'); }
+}
+
+function closeDetail() {
+  document.getElementById('detailPanel').classList.add('hidden');
+  state.activeId = null;
+  document.querySelectorAll('#logBody tr').forEach(r => r.classList.remove('active'));
+}
+
+// ── HELPERS ───────────────────────────────────────────────────────
+function section(title, rows) {
+  return `<div class="detail-section"><div class="detail-section-title">${title}</div>${rows.filter(Boolean).join('')}</div>`;
+}
+function row(key, val) {
+  return `<div class="detail-row"><div class="detail-key">${key}</div><div class="detail-val">${val}</div></div>`;
+}
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function syntaxHighlight(obj) {
+  const json = typeof obj === 'string' ? obj : JSON.stringify(obj, null, 2);
+  return escHtml(json).replace(
+    /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g,
+    m => {
+      if (/^"/.test(m)) return /:$/.test(m) ? `<span class="json-key">${m}</span>` : `<span class="json-str">${m}</span>`;
+      if (/true|false/.test(m)) return `<span class="json-bool">${m}</span>`;
+      if (/null/.test(m)) return `<span class="json-null">${m}</span>`;
+      return `<span class="json-num">${m}</span>`;
+    }
+  );
+}
+
+// ── PAGINATION ────────────────────────────────────────────────────
+function updatePagination(res) {
+  document.getElementById('pgPrev').disabled = res.page <= 1;
+  document.getElementById('pgNext').disabled = res.page >= res.pages;
+  document.getElementById('pgInfo').textContent = `Page ${res.page} of ${res.pages}`;
+  document.getElementById('pgTotal').textContent = `${res.total.toLocaleString()} entries · ${res.limit}/page`;
+}
+
+function changePage(dir) {
+  state.page = Math.max(1, Math.min(state.pages, state.page + dir));
+  applyFilter();
+}
+
+// ── TOAST ─────────────────────────────────────────────────────────
+function showToast(msg, type='ok') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = `toast show ${type}`;
+  setTimeout(() => t.classList.remove('show'), 3000);
+}
+</script>
+</body>
+</html>
